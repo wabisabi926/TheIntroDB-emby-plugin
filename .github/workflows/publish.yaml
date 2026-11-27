@@ -1,5 +1,12 @@
 name: "Publish Plugin"
 
+# Manual release entry point. In the Actions tab, run this workflow with a
+# version such as 1.3.1.0 (or v1.3.1.0). It builds the DLL, stamps that version,
+# and creates a GitHub release with the DLL and checksums attached.
+# This workflow is intentionally the only publisher: running it creates the
+# release itself, so there is no separate "release published" trigger that
+# could upload the same assets twice.
+
 permissions:
   contents: write
 
@@ -7,95 +14,78 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 on:
-  release:
-    types:
-      - released
   workflow_dispatch:
     inputs:
       version:
-        description: "Plugin version (e.g. 1.0.0.0 or v1.0.0.0)"
+        description: "Plugin version (e.g. 1.3.1.0 or v1.3.1.0)"
         required: true
         type: string
+      prerelease:
+        description: "Mark this release as a pre-release"
+        required: false
+        type: boolean
+        default: false
 
 jobs:
-  build:
+  release:
     runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.version.outputs.version }}
-      tag: ${{ steps.version.outputs.tag }}
-      artifact_name: ${{ steps.build.outputs.artifact_name }}
     steps:
-      - name: Checkout Repository
+      - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Set version from release
+      - name: Resolve version
         id: version
+        shell: bash
         run: |
-          RAW="${{ github.event.release.tag_name || github.event.inputs.version }}"
+          RAW="${{ inputs.version }}"
           TAG="$RAW"
           if [[ "$TAG" != v* ]]; then
             TAG="v$TAG"
           fi
           VERSION="${RAW#v}"
-          # Ensure 4-part version (e.g. 1.0.0 -> 1.0.0.0)
+          # Accept 1.2.3 and normalise it to the four-part 1.2.3.0.
           PARTS=$(echo "$VERSION" | tr '.' '\n' | wc -l)
           if [ "$PARTS" -eq 3 ]; then
             VERSION="${VERSION}.0"
           fi
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "tag=$TAG" >> $GITHUB_OUTPUT
-          echo "Using version: $VERSION"
-
-      - name: Update plugin version in project files
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          sed -i "s/<Version>.*<\/Version>/<Version>$VERSION<\/Version>/" TheIntroDB/TheIntroDB.csproj
-          sed -i "s/<AssemblyVersion>.*<\/AssemblyVersion>/<AssemblyVersion>$VERSION<\/AssemblyVersion>/" TheIntroDB/TheIntroDB.csproj
-          sed -i "s/<FileVersion>.*<\/FileVersion>/<FileVersion>$VERSION<\/FileVersion>/" TheIntroDB/TheIntroDB.csproj
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid version: $RAW" >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Using version $VERSION (tag $TAG)"
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: "6.0.x" # Emby plugins typically use an older .NET version
+          dotnet-version: "8.0.x"
 
-      - name: Build Emby Plugin
-        id: build
+      - name: Build plugin
+        shell: bash
         run: |
-          dotnet build --configuration Release TheIntroDB/TheIntroDB.csproj
-          ARTIFACT_NAME="theintrodb_${{ steps.version.outputs.version }}.dll"
-          echo "artifact_name=$ARTIFACT_NAME" >> $GITHUB_OUTPUT
-          cp TheIntroDB/bin/Release/netstandard2.0/TheIntroDB.dll "$ARTIFACT_NAME"
-
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-artifact
-          retention-days: 30
-          if-no-files-found: error
-          path: ${{ steps.build.outputs.artifact_name }}
-
-  upload:
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download Artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: build-artifact
-
-      - name: Prepare GH Release Assets
-        run: |
-          for file in ./*.dll; do
-            [ -f "$file" ] || continue
-            md5sum "${file#./}" > "${file%.*}.md5"
-          done
+          VERSION="${{ steps.version.outputs.version }}"
+          dotnet build TheIntroDB/TheIntroDB.csproj --configuration Release \
+            -p:Version="$VERSION" \
+            -p:AssemblyVersion="$VERSION" \
+            -p:FileVersion="$VERSION"
+          DLL="theintrodb_$VERSION.dll"
+          cp TheIntroDB/bin/Release/netstandard2.0/TheIntroDB.dll "$DLL"
+          sha256sum "$DLL" > "theintrodb_$VERSION.sha256"
+          md5sum "$DLL" > "theintrodb_$VERSION.md5"
           ls -l
 
-      - name: Upload GH Release Assets
+      - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ needs.build.outputs.tag }}
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: ${{ steps.version.outputs.tag }}
+          prerelease: ${{ inputs.prerelease }}
+          generate_release_notes: true
           files: |
-            *.dll
-            *.md5
+            theintrodb_*.dll
+            theintrodb_*.sha256
+            theintrodb_*.md5
           fail_on_unmatched_files: true
