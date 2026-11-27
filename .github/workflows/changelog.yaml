@@ -61,9 +61,21 @@ jobs:
             exit 0
           fi
 
-          last_tag=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq '.tag_name // empty' 2>/dev/null || true)
+          # /releases/latest returns a 404 JSON body on a fork with no published
+          # releases. Fetch the list instead, and only accept a real version tag.
+          last_tag=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq '[.[] | select(.draft == false)][0].tag_name // empty' 2>/dev/null || true)
+          if ! printf '%s' "$last_tag" | grep -Eq '^v?[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?$'; then
+            last_tag=""
+          fi
+          if [ -z "$last_tag" ]; then
+            last_tag=$(git describe --tags --abbrev=0 2>/dev/null || true)
+            if ! printf '%s' "$last_tag" | grep -Eq '^v?[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?$'; then
+              last_tag=""
+            fi
+          fi
           range="HEAD"
-          if [ -n "$last_tag" ]; then
+          if [ -n "$last_tag" ] && git rev-parse --verify --quiet "$last_tag^{commit}" >/dev/null; then
             range="$last_tag..HEAD"
           fi
 
