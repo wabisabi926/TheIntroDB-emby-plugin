@@ -733,6 +733,154 @@ define(["emby-input", "emby-button", "emby-checkbox", "globalize"], function (_i
         throw new Error("No authenticated ApiClient JSON method is available");
     }
 
+    var debugSearchRequestId = 0;
+
+    function formatDebugTicks(ticks) {
+        var totalSeconds = Math.floor((Number(ticks) || 0) / 10000000);
+        var hours = Math.floor(totalSeconds / 3600);
+        var minutes = Math.floor((totalSeconds % 3600) / 60);
+        var seconds = totalSeconds % 60;
+        var pad = (value) => value < 10 ? "0" + value : String(value);
+        return (hours ? hours + ":" + pad(minutes) : pad(minutes)) + ":" + pad(seconds);
+    }
+
+    function debugSegmentLabel(type) {
+        switch (String(type || "").toLowerCase()) {
+            case "intro": return t("debugSegmentIntro");
+            case "recap": return t("debugSegmentRecap");
+            case "credits": return t("debugSegmentCredits");
+            case "preview": return t("debugSegmentPreview");
+            default: return String(type || t("unknownItem"));
+        }
+    }
+
+    function selectDebugItem(item) {
+        page.querySelector("#DebugSelection").style.display = "block";
+        page.querySelector("#DebugSelectionText").textContent = t("debugSelected", { name: getDisplayLabel(item) });
+        page.querySelector("#DebugInternalId").value = item.Id;
+        page.querySelector("#DebugManualContainer").style.display = "none";
+        page.querySelector("#DebugSegmentOutput").textContent = "";
+    }
+
+    function renderDebugResults(items) {
+        var results = page.querySelector("#DebugSearchResults");
+        results.textContent = "";
+        var matchingItems = (items || []).filter((item) => item && item.Id);
+        if (!matchingItems.length) {
+            results.textContent = t("debugNoMatches");
+            return;
+        }
+
+        matchingItems.forEach((item) => {
+            var button = document.createElement("button");
+            button.type = "button";
+            button.textContent = getDisplayLabel(item) + (item.Type ? " · " + item.Type : "");
+            button.style.display = "block";
+            button.style.width = "100%";
+            button.style.textAlign = "left";
+            button.style.margin = "0.25em 0";
+            button.addEventListener("click", () => {
+                selectDebugItem(item);
+            });
+            results.appendChild(button);
+        });
+    }
+
+    function searchDebugItems() {
+        var term = (page.querySelector("#DebugSearch").value || "").trim();
+        var results = page.querySelector("#DebugSearchResults");
+        if (!term) {
+            results.textContent = t("debugNoMatches");
+            return;
+        }
+
+        var requestId = ++debugSearchRequestId;
+        results.textContent = t("debugSearching");
+        var path = currentUserId ? "Users/" + currentUserId + "/Items" : "Items";
+        getJson(ApiClient.getUrl(path, {
+            Recursive: true,
+            SearchTerm: term,
+            IncludeItemTypes: "Movie,Series,Episode",
+            Fields: "ProductionYear",
+            Limit: 25,
+        }))
+            .then((result) => {
+                if (requestId !== debugSearchRequestId) return;
+                renderDebugResults((result && (result.Items || result.items)) || []);
+            })
+            .catch(() => {
+                if (requestId === debugSearchRequestId) results.textContent = t("debugSearchFailed");
+            });
+    }
+
+    function toggleDebugManualId() {
+        var container = page.querySelector("#DebugManualContainer");
+        var show = container.style.display !== "block";
+        container.style.display = show ? "block" : "none";
+    }
+
+    function renderDebugSegments(segments) {
+        var output = page.querySelector("#DebugSegmentOutput");
+        output.textContent = "";
+        if (!segments.length) {
+            output.textContent = t("debugNoSegments");
+            return;
+        }
+
+        var summary = document.createElement("div");
+        summary.textContent = t("debugHasSegments", { count: segments.length });
+        output.appendChild(summary);
+
+        segments.forEach((segment) => {
+            var row = document.createElement("div");
+            row.textContent = debugSegmentLabel(segment.Type)
+                + "  " + formatDebugTicks(segment.StartTicks)
+                + " → " + formatDebugTicks(segment.EndTicks);
+            output.appendChild(row);
+        });
+
+        var raw = document.createElement("pre");
+        raw.textContent = JSON.stringify(segments, null, 2);
+        raw.style.display = "none";
+        output.appendChild(raw);
+
+        var toggle = document.createElement("button");
+        toggle.type = "button";
+        toggle.textContent = t("debugRawJson");
+        toggle.style.marginTop = "0.5em";
+        toggle.addEventListener("click", () => {
+            var visible = raw.style.display !== "none";
+            raw.style.display = visible ? "none" : "block";
+            toggle.textContent = visible ? t("debugRawJson") : t("debugHideRawJson");
+        });
+        output.appendChild(toggle);
+    }
+
+    function loadDebugSegments() {
+        var output = page.querySelector("#DebugSegmentOutput");
+        output.textContent = "";
+        var internalId = parseInt((page.querySelector("#DebugInternalId").value || "").trim(), 10);
+        if (!isFinite(internalId) || internalId <= 0) {
+            output.textContent = t("invalidInternalId");
+            return;
+        }
+
+        Dashboard.showLoadingMsg();
+        getJson(ApiClient.getUrl("TheIntroDB/Segments", { InternalId: internalId }))
+            .then((result) => {
+                renderDebugSegments(Array.isArray(result) ? result : []);
+            })
+            .catch(() => {
+                output.textContent = t("segmentsFailed");
+            })
+            .then(() => {
+                Dashboard.hideLoadingMsg();
+            })
+            .catch(() => {
+                Dashboard.hideLoadingMsg();
+            });
+    }
+
     function postJson(url, payload) {
         if (typeof ApiClient.ajax === "function") {
             return ApiClient.ajax({
@@ -1048,6 +1196,17 @@ define(["emby-input", "emby-button", "emby-checkbox", "globalize"], function (_i
         }
     });
 
+    page.querySelector("#DebugSearch").addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+            event.preventDefault();
+            searchDebugItems();
+        }
+    });
+
+    page.querySelector(".btnDebugSearch").addEventListener("click", searchDebugItems);
+    page.querySelector(".btnManualId").addEventListener("click", toggleDebugManualId);
+    page.querySelector(".btnLoadSegments").addEventListener("click", loadDebugSegments);
+
     page.querySelector("#CloseApiStats").addEventListener("click", () => {
         closeApiStatsOverlay();
     });
@@ -1115,43 +1274,6 @@ define(["emby-input", "emby-button", "emby-checkbox", "globalize"], function (_i
             });
         return false;
     });
-
-    var loadSegmentsButton = page.querySelector(".btnLoadSegments");
-    if (loadSegmentsButton) {
-        loadSegmentsButton.addEventListener("click", (event) => {
-            event.preventDefault();
-            var output = page.querySelector(".segmentOutput");
-            if (!output) {
-                return;
-            }
-
-            output.textContent = "";
-            var internalId = parseInt((page.querySelector("#DebugInternalId").value || "").trim(), 10);
-            if (!internalId) {
-                output.textContent = t("invalidInternalId");
-                return;
-            }
-
-            Dashboard.showLoadingMsg();
-            getJson(
-                ApiClient.getUrl("TheIntroDB/Segments", {
-                    InternalId: internalId,
-                }),
-            )
-                .then((result) => {
-                    output.textContent = JSON.stringify(result, null, 2);
-                })
-                .catch((error) => {
-                    output.textContent = error && error.message ? error.message : t("segmentsFailed");
-                })
-                .then(() => {
-                    Dashboard.hideLoadingMsg();
-                })
-                .catch(() => {
-                    Dashboard.hideLoadingMsg();
-                });
-        });
-    }
 
     translationsReady.then(() => {
         updateSelectedSummary();

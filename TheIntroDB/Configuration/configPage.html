@@ -184,15 +184,31 @@
 
             <div class="verticalSection">
                 <h3 class="sectionTitle"><span data-i18n="debug">Debug</span></h3>
+                <p class="fieldDescription"><span data-i18n="debugHelp">Find an item by title to inspect the segments cached locally for it. This is read-only and never contacts TheIntroDB.</span></p>
                 <div class="inputContainer">
-                    <label class="inputLabel inputLabelUnfocused" for="DebugInternalId"><span data-i18n="internalId">Item InternalId</span></label>
-                    <input id="DebugInternalId" name="DebugInternalId" type="number" is="emby-input" autocomplete="off" />
-                    <div class="fieldDescription"><span data-i18n="internalIdHelp">Loads stored segments for a specific item from the local DB.</span></div>
+                    <label class="inputLabel inputLabelUnfocused" for="DebugSearch"><span data-i18n="debugFindItem">Find a media item</span></label>
+                    <input id="DebugSearch" name="DebugSearch" type="search" is="emby-input" autocomplete="off" />
                 </div>
-                <button is="emby-button" type="button" class="raised button-submit block emby-button btnLoadSegments">
-                    <span><span data-i18n="loadSegments">Load Segments</span></span>
+                <button is="emby-button" type="button" class="raised button-submit block emby-button btnDebugSearch">
+                    <span><span data-i18n="debugSearch">Search</span></span>
                 </button>
-                <pre class="segmentOutput" style="white-space: pre-wrap; margin-top: 1em"></pre>
+                <div id="DebugSearchResults" style="margin-top: 0.5em"></div>
+                <div id="DebugSelection" style="display: none; margin-top: 0.75em">
+                    <div class="fieldDescription"><span id="DebugSelectionText"></span></div>
+                    <button is="emby-button" type="button" class="emby-button btnManualId">
+                        <span><span data-i18n="debugManualId">Enter ID manually</span></span>
+                    </button>
+                    <div id="DebugManualContainer" style="display: none; margin-top: 0.5em">
+                        <label class="inputLabel inputLabelUnfocused" for="DebugInternalId"><span data-i18n="internalId">Item InternalId</span></label>
+                        <input id="DebugInternalId" name="DebugInternalId" type="number" is="emby-input" autocomplete="off" />
+                        <div class="fieldDescription"><span data-i18n="internalIdHelp">Loads stored segments for a specific item from the local DB.</span></div>
+                    </div>
+                    <button is="emby-button" type="button" class="raised button-submit block emby-button btnLoadSegments">
+                        <span><span data-i18n="loadSegments">Load Segments</span></span>
+                    </button>
+                </div>
+                <div id="DebugSegmentOutput" class="segmentOutput" style="white-space: pre-wrap; margin-top: 1em"></div>
+                <p class="fieldDescription"><span data-i18n="debugScanTip">No segments? Run the TheIntroDB Media Segment Scan scheduled task and check that the library is in the scan scope.</span></p>
             </div>
 
             <div>

@@ -11,7 +11,7 @@ const js = fs.readFileSync("TheIntroDB/Configuration/configPage.js", "utf8")
     .replace("/* DEFAULT_LOCALE */ null", () => englishJson);
 const keys = [...html.matchAll(/data-i18n="([^"]+)"/g)].map((match) => match[1]);
 
-async function setup({host, culture, lang = "", browser = "en-US", fail = false, readSettings, readLibraries, apiStats, controllerSource = js} = {}) {
+async function setup({host, culture, lang = "", browser = "en-US", fail = false, readSettings, readLibraries, apiStats, searchItems, segments, controllerSource = js} = {}) {
     const nodes = new Map();
     function node() {
         return { style: {}, events: {}, children: [], value: "", textContent: "",
@@ -51,6 +51,10 @@ async function setup({host, culture, lang = "", browser = "en-US", fail = false,
                     return Promise.resolve(JSON.parse(fs.readFileSync("TheIntroDB/Configuration/locales/" + filename + ".json", "utf8")));
                 }
                 if (readLibraries && request.url === "Users/test-user/Views") return readLibraries();
+                if (searchItems && (request.url === "Items" || request.url === "Users/test-user/Items")) {
+                    return Promise.resolve({Items: searchItems});
+                }
+                if (segments && request.url === "TheIntroDB/Segments") return Promise.resolve(segments);
                 if (apiStats && request.url === "TheIntroDB/Validation/ApiKeyStats") {
                     return Promise.resolve({isValid: true, stats: apiStats});
                 }
@@ -182,4 +186,40 @@ test("Failed settings loads leave Save blocked until a later successful load", a
     shouldFail = false;
     await fixture.pageEvents.viewshow();
     assert.equal(fixture.get(submitSelector).disabled, false);
+});
+
+test("Debug search selects a titled item and shows readable cached segments", async () => {
+    const fixture = await setup({
+        lang: "zh-CN",
+        searchItems: [{Id: "12847", Name: "沙丘", ProductionYear: 2024, Type: "Movie"}],
+        segments: [{ItemInternalId: 12847, Type: "Intro", StartTicks: 120000000, EndTicks: 1050000000}],
+    });
+
+    fixture.get("#DebugSearch").value = "沙丘";
+    fixture.get(".btnDebugSearch").events.click();
+    await new Promise(setImmediate);
+    assert.equal(fixture.get("#DebugSearchResults").textContent, "");
+    const resultButton = fixture.get("#DebugSearchResults").children[0];
+    assert.match(resultButton.textContent, /沙丘.*Movie/);
+
+    resultButton.events.click();
+    assert.equal(fixture.get("#DebugInternalId").value, "12847");
+    assert.match(fixture.get("#DebugSelectionText").textContent, /已选择：沙丘/);
+
+    fixture.get(".btnLoadSegments").events.click();
+    await new Promise(setImmediate);
+    const output = fixture.get("#DebugSegmentOutput");
+    assert.match(output.children[0].textContent, /已缓存 1 个片段/);
+    assert.match(output.children[1].textContent, /片头.*00:12.*01:45/);
+    assert.ok(output.children.some((child) => child.textContent === "查看原始 JSON"));
+});
+
+test("Manual ID stays available when no search result is chosen", async () => {
+    const fixture = await setup({lang: "en-US"});
+    assert.equal(fixture.get("#DebugManualContainer").style.display, undefined);
+    fixture.get(".btnManualId").events.click();
+    assert.equal(fixture.get("#DebugManualContainer").style.display, "block");
+
+    fixture.get(".btnLoadSegments").events.click();
+    assert.match(fixture.get("#DebugSegmentOutput").textContent, /valid InternalId/);
 });
