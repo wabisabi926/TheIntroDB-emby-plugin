@@ -7,3 +7,4 @@ obj/
 *.pdb
 !**/content/**/*.dll
 .DS_Store
+.workbuddy-ai/
